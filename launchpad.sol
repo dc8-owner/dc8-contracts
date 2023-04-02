@@ -1748,9 +1748,7 @@ library SafeMath {
 }
 
 interface INFT {
-    function safeMintLevel(address to, uint256 level)
-        external
-        returns (uint256);
+    function safeMint(address to) external returns (uint256);
 }
 
 contract DC8NFTLaunchpad is
@@ -1770,17 +1768,15 @@ contract DC8NFTLaunchpad is
     ///////////////// VARIABLES /////////////////
     address public royaltyAddress;
     address public treasuryAddress;
-    string private hashKey;
     INFT public DC8NFT;
     Launchpad[] public launches;
-    mapping(address => mapping(uint256 => bool)) public whiteList;
+    mapping(address walletAddress => mapping(uint256 launchIndex => uint256 maxAmountToBuy)) public whiteList;
 
     ///////////////// Events, Structs, Interfaces /////////////////
     event LaunchpadMint(
         address indexed wallet,
-        uint256 tokenId,
-        uint256 level,
         uint256 launchIndex,
+        uint256 amount,
         uint256 timestamp
     );
 
@@ -1789,22 +1785,27 @@ contract DC8NFTLaunchpad is
         bool status;
         uint256 amount;
         uint256 sold;
-        uint256 multiTimes;
         bool isPrivate;
     }
 
-    modifier whenInWhiteList(uint256 _launchpadIndex) {
-        _requireInWhiteList(_launchpadIndex);
+    struct IUpdateLaunch {
+        uint256 launchIndex;
+        bool status;
+    }
+
+    modifier whenInWhiteList(uint256 _launchpadIndex, uint256 _amount) {
+        _requireInWhiteList(_launchpadIndex,_amount);
         _;
     }
 
     ///////////////// Config Functions /////////////////
     function addWhiteList(
         uint256 _launchpadIndex,
+        uint256 _maxAmountToBuy,
         address[] calldata _whiteList
     ) external onlyRole(SETTING_ROLE) {
         for (uint256 i; i < _whiteList.length; ) {
-            whiteList[_whiteList[i]][_launchpadIndex] = true;
+            whiteList[_whiteList[i]][_launchpadIndex] = _maxAmountToBuy;
             unchecked {
                 i++;
             }
@@ -1815,118 +1816,110 @@ contract DC8NFTLaunchpad is
         external
         onlyRole(SETTING_ROLE)
     {
-        for (uint256 i = 0; i < _launches.length; i++) {
+        for (uint256 i = 0; i < _launches.length;) {
             launches.push(
                 Launchpad({
                     price: _launches[i].price,
                     status: _launches[i].status,
                     amount: _launches[i].amount,
                     sold: _launches[i].sold,
-                    multiTimes: _launches[i].multiTimes,
                     isPrivate: _launches[i].isPrivate
                 })
             );
+
+            unchecked {
+                i++;
+            }
         }
     }
 
-    function updateLaunch(
-        uint32 _index,
-        uint256 _price,
-        bool _status,
-        uint256 _amount,
-        uint256 _sold,
-        uint256 _multiTimes,
-        bool _isPrivate
-    ) external onlyRole(SETTING_ROLE) {
-        require(_index < launches.length, "Invalid index");
-        require(_price > 0, "Price must greater than 0");
+    function updateLaunchStatus(IUpdateLaunch[] calldata _launchStatus) external onlyRole(SETTING_ROLE) {
+        for (uint256 i = 0; i < _launchStatus.length;) {
+            launches[_launchStatus[i].launchIndex].status = _launchStatus[i].status;
 
-        launches[_index].price = _price;
-        launches[_index].status = _status;
-        launches[_index].amount = _amount;
-        launches[_index].sold = _sold;
-        launches[_index].multiTimes = _multiTimes;
-        launches[_index].isPrivate = _isPrivate;
+            unchecked {
+                i++;
+            }
+        }
     }
 
     ///////////////// Action Functions /////////////////
 
-    function mint(uint256 _launchIndex)
+    function mint(uint256 _launchIndex, uint256 _amount)
         external
         payable
         nonReentrant
         whenNotPaused
     {
+        require(_amount > 0, "Invalid amount");
         require(_launchIndex < launches.length, "Invalid launchpad");
         require(launches[_launchIndex].status, "Launchpad is disable");
         require(
-            launches[_launchIndex].sold < launches[_launchIndex].amount,
+            launches[_launchIndex].sold + _amount <
+                launches[_launchIndex].amount,
             "Launchpad is sold off"
         );
         require(!launches[_launchIndex].isPrivate, "Not public package!");
-        require(msg.value == launches[_launchIndex].price, "Invalid ETH value");
+
+        uint256 totalValue = launches[_launchIndex].price * _amount;
+        require(msg.value == totalValue, "Invalid ETH value");
 
         (bool sent, ) = royaltyAddress.call{value: (msg.value).mul(5).div(100)}(
             ""
         );
         require(sent, "Failed to send Ether");
 
-        for (uint256 i = 0; i < launches[_launchIndex].multiTimes; ) {
+        for (uint256 i = 0; i < _amount; ) {
             launches[_launchIndex].sold++;
-            uint256 randomNumber = random(launches[_launchIndex].sold);
-            uint256 tokenId = DC8NFT.safeMintLevel(msg.sender, randomNumber);
-            emit LaunchpadMint(
-                msg.sender,
-                tokenId,
-                randomNumber,
-                _launchIndex,
-                block.timestamp
-            );
+            DC8NFT.safeMint(msg.sender);
 
             unchecked {
                 i++;
             }
         }
+
+        emit LaunchpadMint(
+                msg.sender,
+                _launchIndex,
+                _amount,
+                block.timestamp
+            );
     }
 
-    function privateMint(uint256 _launchIndex)
+    function privateMint(uint256 _launchIndex, uint256 _amount)
         external
         payable
         nonReentrant
         whenNotPaused
-        whenInWhiteList(_launchIndex)
+        whenInWhiteList(_launchIndex, _amount)
     {
+        require(_amount > 0, "Invalid amount");
         require(_launchIndex < launches.length, "Invalid launchpad");
         require(launches[_launchIndex].status, "Launchpad is disable");
-        require(
-            launches[_launchIndex].sold < launches[_launchIndex].amount,
-            "Launchpad is sold off"
-        );
-        require(msg.value == launches[_launchIndex].price, "Invalid ETH value");
+
+        uint256 totalValue = launches[_launchIndex].price * _amount;
+        require(msg.value == totalValue, "Invalid ETH value");
 
         (bool sent, ) = royaltyAddress.call{value: (msg.value).mul(5).div(100)}(
             ""
         );
         require(sent, "Failed to send Ether");
 
-        delete whiteList[msg.sender][_launchIndex];
-
-        for (uint256 i = 0; i < launches[_launchIndex].multiTimes; ) {
-            launches[_launchIndex].sold++;
-            uint256 randomNumber = random(launches[_launchIndex].sold);
-            uint256 tokenId = DC8NFT.safeMintLevel(msg.sender, randomNumber);
-            emit LaunchpadMint(
-                msg.sender,
-                tokenId,
-                randomNumber,
-                _launchIndex,
-                block.timestamp
-            );
+        for (uint256 i = 0; i < _amount; ) {
+            whiteList[msg.sender][_launchIndex]--;
+            DC8NFT.safeMint(msg.sender);
 
             unchecked {
                 i++;
             }
         }
+
+        emit LaunchpadMint(
+                msg.sender,
+                _launchIndex,
+                _amount,
+                block.timestamp
+            );
     }
 
     function claim() external onlyRole(CLAIM_ROLE) {
@@ -1935,25 +1928,9 @@ contract DC8NFTLaunchpad is
 
     ///////////////// Util Functions /////////////////
 
-    function random(uint256 changer) private view returns (uint256) {
-        uint256 randomNumber = uint256(
-            keccak256(
-                abi.encodePacked(
-                    block.timestamp,
-                    msg.sender,
-                    block.difficulty,
-                    hashKey,
-                    changer
-                )
-            )
-        ) % 5;
-
-        return randomNumber + 1;
-    }
-
-    function _requireInWhiteList(uint256 _launchpadIndex) private view {
+    function _requireInWhiteList(uint256 _launchpadIndex, uint256 _amount) private view {
         require(launches[_launchpadIndex].isPrivate, "Not private package");
-        require(whiteList[msg.sender][_launchpadIndex], "Not in whiteList");
+        require(_amount <= whiteList[msg.sender][_launchpadIndex], "Your amount overflow the whitelist");
     }
 
     ///////////////// Standard Functions /////////////////
@@ -1961,8 +1938,7 @@ contract DC8NFTLaunchpad is
     function initialize(
         INFT NFT,
         address _royaltyAddress,
-        address _treasuryAddress,
-        string calldata _hashKey
+        address _treasuryAddress
     ) public initializer {
         __Pausable_init();
         __AccessControl_init_unchained();
@@ -1974,26 +1950,74 @@ contract DC8NFTLaunchpad is
         royaltyAddress = _royaltyAddress;
         treasuryAddress = _treasuryAddress;
         DC8NFT = NFT;
-        hashKey = _hashKey;
+
+        launches.push(
+            Launchpad({
+                price: 0.068 ether,
+                status: false,
+                amount: 0,
+                sold: 0,
+                isPrivate: true
+            })
+        );
+
+        launches.push(
+            Launchpad({
+                price: 0.072 ether,
+                status: true,
+                amount: 0,
+                sold: 0,
+                isPrivate: true
+            })
+        );
+
+        launches.push(
+            Launchpad({
+                price: 0.072 ether,
+                status: false,
+                amount: 800,
+                sold: 0,
+                isPrivate: false
+            })
+        );
+
+        launches.push(
+            Launchpad({
+                price: 0.074 ether,
+                status: false,
+                amount: 800,
+                sold: 0,
+                isPrivate: false
+            })
+        );
+
+        launches.push(
+            Launchpad({
+                price: 0.076 ether,
+                status: false,
+                amount: 800,
+                sold: 0,
+                isPrivate: false
+            })
+        );
+
+        launches.push(
+            Launchpad({
+                price: 0.078 ether,
+                status: false,
+                amount: 800,
+                sold: 0,
+                isPrivate: false
+            })
+        );
 
         launches.push(
             Launchpad({
                 price: 0.08 ether,
-                status: true,
-                amount: 2250,
+                status: false,
+                amount: 800,
                 sold: 0,
-                multiTimes: 5,
                 isPrivate: false
-            })
-        );
-        launches.push(
-            Launchpad({
-                price: 0.08 ether,
-                status: true,
-                amount: 250,
-                sold: 0,
-                multiTimes: 5,
-                isPrivate: true
             })
         );
     }
