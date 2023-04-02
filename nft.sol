@@ -3220,10 +3220,7 @@ contract DC8NFT is
 
     //////////////// Custom function ////////////////
 
-    event MintLevel(uint256 indexed tokenId, uint256 level, address to, uint256 timestamp);
-
     struct Nft {
-        uint256 level;
         uint256 lockTime;
     }
 
@@ -3258,46 +3255,18 @@ contract DC8NFT is
         Tokens[tokenId].lockTime = 0;
     }
 
-    function updateTokenLevel(uint256 tokenId, uint256 level)
-        external
-        onlyRole(SETTING_ROLE)
-    {
-        setTokenLevel(tokenId, level);
-    }
-
-    function safeMintLevel(address to, uint256 level)
-        external
-        onlyRole(MINTER_ROLE)
-        returns (uint256)
-    {
-        uint256 tokenId = _tokenIdCounter.current();
-        _tokenIdCounter.increment();
-        _safeMint(to, tokenId);
-        setTokenLevel(tokenId, level);
-
-        emit MintLevel(tokenId, level, to, block.timestamp);
-
-        return tokenId;
-    }
-
     function tokenInfo(uint256 tokenId)
         external
         view
         returns (
             string memory tokenUri,
             address tokenOwner,
-            uint256 lockTime,
-            uint256 level
+            uint256 lockTime
         )
     {
         tokenUri = tokenURI(tokenId);
         tokenOwner = ownerOf(tokenId);
         lockTime = Tokens[tokenId].lockTime;
-        level = Tokens[tokenId].level;
-    }
-
-    function setTokenLevel(uint256 tokenId, uint256 level) private {
-        Tokens[tokenId].level = level;
     }
 
     //////////////// Standard ERC721 ////////////////
@@ -3314,8 +3283,6 @@ contract DC8NFT is
         uint256 tokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
         _safeMint(to, tokenId);
-
-        emit MintLevel(tokenId, 0, to, block.timestamp);
 
         return tokenId;
     }
